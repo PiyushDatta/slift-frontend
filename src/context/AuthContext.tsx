@@ -17,6 +17,7 @@ import {
   startGoogleAuth,
   validateSessionToken,
 } from "../api";
+import { isTrustedAuthOrigin, toTrustedAuthUrl } from "../utils/urlSecurity";
 
 type AuthStatus = "checking" | "authenticated" | "unauthenticated";
 
@@ -54,6 +55,14 @@ const normalizeExpiryMs = (value?: number | null) => {
   return value < 1_000_000_000_000 ? value * 1000 : value;
 };
 
+const asNonEmptyString = (value: unknown) => {
+  if (typeof value !== "string") {
+    return null;
+  }
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
+};
+
 const canUseWebStorage = () =>
   Platform.OS === "web" &&
   typeof globalThis !== "undefined" &&
@@ -64,16 +73,40 @@ const canUseWebWindow = () =>
   typeof globalThis !== "undefined" &&
   "window" in globalThis;
 
+const clearLegacyWebSession = () => {
+  if (!canUseWebStorage()) {
+    return;
+  }
+
+  try {
+    globalThis.localStorage.removeItem(SESSION_TOKEN_KEY);
+    globalThis.localStorage.removeItem(SESSION_EXPIRES_AT_KEY);
+    globalThis.sessionStorage?.removeItem?.(SESSION_TOKEN_KEY);
+    globalThis.sessionStorage?.removeItem?.(SESSION_EXPIRES_AT_KEY);
+  } catch {
+    // Best effort only.
+  }
+};
+
 const openAuthConsentUrl = async (url: string) => {
   if (canUseWebWindow()) {
     const windowRef = (globalThis as any).window;
-    const popup = windowRef?.open?.(url, "_blank");
+    const popup = windowRef?.open?.("about:blank", "_blank");
+    try {
+      if (popup) {
+        popup.opener = null;
+        if (popup.location) {
+          popup.location.href = url;
+        }
+      }
+    } catch {
+      // Best-effort hardening only.
+    }
     if (popup) {
       popup.focus?.();
       return;
     }
-    windowRef?.location?.assign?.(url);
-    return;
+    throw new Error("Unable to open auth popup window.");
   }
 
   await Linking.openURL(url);
@@ -81,25 +114,8 @@ const openAuthConsentUrl = async (url: string) => {
 
 const readPersistedSession = async () => {
   if (Platform.OS === "web") {
-    if (!canUseWebStorage()) {
-      return null;
-    }
-
-    try {
-      const token = globalThis.localStorage.getItem(SESSION_TOKEN_KEY);
-      const expiresAtRaw = globalThis.localStorage.getItem(
-        SESSION_EXPIRES_AT_KEY,
-      );
-      const expiresAt = expiresAtRaw ? Number(expiresAtRaw) : null;
-      return token
-        ? {
-            token,
-            expiresAt: normalizeExpiryMs(expiresAt),
-          }
-        : null;
-    } catch {
-      return null;
-    }
+    clearLegacyWebSession();
+    return null;
   }
 
   try {
@@ -119,32 +135,20 @@ const readPersistedSession = async () => {
   }
 };
 
-const persistSession = async (token: string, expiresAt: number | null) => {
+const persistSession = async (_token: string, _expiresAt: number | null) => {
   if (Platform.OS === "web") {
-    if (!canUseWebStorage()) {
-      return;
-    }
-
-    try {
-      globalThis.localStorage.setItem(SESSION_TOKEN_KEY, token);
-      if (typeof expiresAt === "number") {
-        globalThis.localStorage.setItem(
-          SESSION_EXPIRES_AT_KEY,
-          String(expiresAt),
-        );
-      } else {
-        globalThis.localStorage.removeItem(SESSION_EXPIRES_AT_KEY);
-      }
-    } catch {
-      // Best effort only; app can run with in-memory session state.
-    }
+    // Intentionally avoid persistent web storage for session tokens.
+    clearLegacyWebSession();
     return;
   }
 
   try {
-    await SecureStore.setItemAsync(SESSION_TOKEN_KEY, token);
-    if (typeof expiresAt === "number") {
-      await SecureStore.setItemAsync(SESSION_EXPIRES_AT_KEY, String(expiresAt));
+    await SecureStore.setItemAsync(SESSION_TOKEN_KEY, _token);
+    if (typeof _expiresAt === "number") {
+      await SecureStore.setItemAsync(
+        SESSION_EXPIRES_AT_KEY,
+        String(_expiresAt),
+      );
     } else {
       await SecureStore.deleteItemAsync(SESSION_EXPIRES_AT_KEY);
     }
@@ -155,16 +159,7 @@ const persistSession = async (token: string, expiresAt: number | null) => {
 
 const clearPersistedSession = async () => {
   if (Platform.OS === "web") {
-    if (!canUseWebStorage()) {
-      return;
-    }
-
-    try {
-      globalThis.localStorage.removeItem(SESSION_TOKEN_KEY);
-      globalThis.localStorage.removeItem(SESSION_EXPIRES_AT_KEY);
-    } catch {
-      // Best effort only.
-    }
+    clearLegacyWebSession();
     return;
   }
 
@@ -195,6 +190,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
   }, [sessionToken]);
 
   const clearSession = useCallback((message?: string) => {
+    sessionTokenRef.current = null;
     setSessionToken(null);
     setSessionExpiresAt(null);
     setStatus("unauthenticated");
@@ -209,6 +205,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
   const applySession = useCallback(
     (token: string, expiresAt?: number | null) => {
       const expiresAtMs = normalizeExpiryMs(expiresAt);
+      sessionTokenRef.current = token;
       setSessionToken(token);
       setSessionExpiresAt(expiresAtMs);
       setStatus("authenticated");
@@ -330,19 +327,33 @@ export function AuthProvider({ children }: AuthProviderProps) {
         clearSession("No auth URL returned. Please retry.");
         return false;
       }
+      const trustedAuthUrl = toTrustedAuthUrl(startResponse.auth_url);
+      if (!trustedAuthUrl) {
+        clearSession("Received an unsafe auth URL. Please retry.");
+        return false;
+      }
 
       try {
-        await openAuthConsentUrl(startResponse.auth_url);
+        await openAuthConsentUrl(trustedAuthUrl);
       } catch {
         // Continue polling; user can still complete auth outside this call.
       }
 
       let authAckSignaled = false;
+      let callbackSessionToken: string | null = null;
+      let callbackSessionExpiresAt: number | null = null;
+      let callbackError: string | null = null;
       let removeMessageListener = () => {};
 
       if (canUseWebWindow()) {
         const windowRef = (globalThis as any).window;
         const onMessage = (event: any) => {
+          if (
+            typeof event?.origin !== "string" ||
+            !isTrustedAuthOrigin(event.origin, trustedAuthUrl)
+          ) {
+            return;
+          }
           const payload = event?.data;
           if (!payload || payload.type !== "auth_ack") {
             return;
@@ -352,6 +363,21 @@ export function AuthProvider({ children }: AuthProviderProps) {
             payload.provider !== "google"
           ) {
             return;
+          }
+
+          if (payload.status === "error") {
+            callbackError = asNonEmptyString(payload.error);
+          }
+          if (payload.status === "success") {
+            const tokenFromMessage = asNonEmptyString(payload.session_token);
+            if (tokenFromMessage) {
+              callbackSessionToken = tokenFromMessage;
+              const expiresRaw = payload.session_expires_at;
+              callbackSessionExpiresAt =
+                typeof expiresRaw === "number" && Number.isFinite(expiresRaw)
+                  ? expiresRaw
+                  : null;
+            }
           }
           authAckSignaled = true;
         };
@@ -365,9 +391,28 @@ export function AuthProvider({ children }: AuthProviderProps) {
       try {
         const startedAt = Date.now();
         while (Date.now() - startedAt <= AUTH_ACK_TIMEOUT_MS) {
+          if (callbackSessionToken) {
+            applySession(callbackSessionToken, callbackSessionExpiresAt);
+            return true;
+          }
+          if (callbackError) {
+            clearSession(callbackError);
+            return false;
+          }
+
           if (!authAckSignaled) {
             await sleep(AUTH_ACK_POLL_MS);
           }
+
+          if (callbackSessionToken) {
+            applySession(callbackSessionToken, callbackSessionExpiresAt);
+            return true;
+          }
+          if (callbackError) {
+            clearSession(callbackError);
+            return false;
+          }
+
           authAckSignaled = false;
           const ack = await getAuthAck(startResponse.auth_id);
 
@@ -375,11 +420,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
             continue;
           }
 
-          if (
-            ack.status === "success" &&
-            ack.acknowledged &&
-            ack.session_token
-          ) {
+          if (ack.status === "success" && ack.session_token) {
             applySession(ack.session_token, ack.session_expires_at ?? null);
             return true;
           }

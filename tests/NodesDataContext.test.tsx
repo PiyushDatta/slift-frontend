@@ -3,6 +3,10 @@ import React, { useEffect } from "react";
 import { act, render, waitFor } from "@testing-library/react-native";
 
 import type { NodesAndPostsResponse } from "../src/api";
+import {
+  MAX_POSTS_PER_NODE,
+  MIN_POSTS_PER_NODE,
+} from "../src/config/dataLimits";
 
 let nextResponses: NodesAndPostsResponse[] = [];
 
@@ -116,7 +120,7 @@ describe("NodesDataContext", () => {
     expect(latest.data.edges.length).toBe(2);
   });
 
-  it("caps posts to 30 and keeps the newest ones", async () => {
+  it("caps posts to 100 and keeps the newest ones", async () => {
     const makePosts = (start: number, end: number) =>
       Array.from({ length: end - start + 1 }, (_, index) => {
         const value = start + index;
@@ -133,7 +137,7 @@ describe("NodesDataContext", () => {
             y: 0,
             size: 60,
             tone: "primary",
-            posts: makePosts(1, 20),
+            posts: makePosts(1, 80),
           },
         ],
         edges: [],
@@ -147,7 +151,7 @@ describe("NodesDataContext", () => {
             y: 0,
             size: 60,
             tone: "primary",
-            posts: makePosts(21, 40),
+            posts: makePosts(81, 150),
           },
         ],
         edges: [],
@@ -174,9 +178,59 @@ describe("NodesDataContext", () => {
     await waitFor(() => expect(latest.data?.nodes?.length).toBe(2));
 
     const node = latest.data.nodes.find((entry: any) => entry.id === "alpha");
-    expect(node.posts.length).toBe(30);
-    expect(node.posts[0].id).toBe("40");
-    expect(node.posts[node.posts.length - 1].id).toBe("11");
+    expect(node.posts.length).toBe(100);
+    expect(node.posts[0].id).toBe("150");
+    expect(node.posts[node.posts.length - 1].id).toBe("51");
+  });
+
+  it("limits topic nodes to 30 and keeps for_you separate", async () => {
+    const topicNodes = Array.from({ length: 35 }, (_, index) => ({
+      id: `topic-${index + 1}`,
+      label: `Topic ${index + 1}`,
+      x: index * 10,
+      y: index * 5,
+      size: 60,
+      tone: "primary" as const,
+      posts: [{ id: `p-${index + 1}`, timestamp: index + 1 }],
+    }));
+    const topicEdges = Array.from({ length: 34 }, (_, index) => ({
+      from: `topic-${index + 1}`,
+      to: `topic-${index + 2}`,
+      strength: 1 as const,
+    }));
+
+    nextResponses = [
+      {
+        nodes: topicNodes,
+        edges: topicEdges,
+      },
+    ];
+
+    let latest: any;
+
+    render(
+      <NodesDataProvider disableAutoLoad>
+        <Probe onUpdate={(value) => (latest = value)} />
+      </NodesDataProvider>,
+    );
+
+    await waitFor(() => expect(latest).toBeTruthy());
+
+    await act(async () => {
+      await latest.refreshNodes();
+    });
+
+    await waitFor(() => expect(latest.data?.nodes?.length).toBe(31));
+
+    const topicCount = latest.data.nodes.filter(
+      (node: any) => node.id !== "for_you",
+    ).length;
+    const forYou = latest.data.nodes.find((node: any) => node.id === "for_you");
+
+    expect(topicCount).toBe(30);
+    expect(forYou).toBeTruthy();
+    expect(forYou.posts.length).toBeGreaterThanOrEqual(MIN_POSTS_PER_NODE);
+    expect(forYou.posts.length).toBeLessThanOrEqual(MAX_POSTS_PER_NODE);
   });
 
   it("treats & and and as the same node id", async () => {

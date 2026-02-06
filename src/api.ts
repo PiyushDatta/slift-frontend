@@ -14,8 +14,12 @@ export type {
   TwitterLinkResponse,
   TwitterSyncRequest,
   TwitterSyncResponse,
+  TwitterFeedRequest,
+  TwitterFeedSyncResponse,
   TwitterSyncStatusResponse,
   QueueClearResponse,
+  QueueStatusResponse,
+  QueueStatusRequest,
   UserProfileResponse,
   UserProfileRequest,
 } from "./contracts";
@@ -29,16 +33,18 @@ import type {
   TwitterLinkResponse,
   TwitterSyncRequest,
   TwitterSyncResponse,
+  TwitterFeedRequest,
+  TwitterFeedSyncResponse,
   TwitterSyncStatusResponse,
   QueueClearResponse,
+  QueueStatusResponse,
+  QueueStatusRequest,
   UserProfileResponse,
   UserProfileRequest,
 } from "./contracts";
+import { assertSafeApiBaseUrlForWeb, getApiBaseUrl } from "./utils/urlSecurity";
 
-const API_BASE_URL =
-  process.env.EXPO_PUBLIC_API_BASE_URL ?? "http://127.0.0.1:8000";
-
-const normalizeBaseUrl = (value: string) => value.replace(/\/$/, "");
+const API_BASE_URL = getApiBaseUrl();
 
 export class ApiRequestError extends Error {
   status: number;
@@ -67,7 +73,15 @@ export const configureApiAuth = (config: Partial<ApiAuthConfig>) => {
   };
 };
 
-const buildUrl = (path: string) => `${normalizeBaseUrl(API_BASE_URL)}${path}`;
+const buildUrl = (path: string) => {
+  assertSafeApiBaseUrlForWeb();
+  return `${API_BASE_URL}${path}`;
+};
+
+const getAuthToken = () => apiAuthConfig.getToken();
+
+const shouldSendUserId = (userId?: string) =>
+  typeof userId === "string" && userId.length > 0 && !getAuthToken();
 
 const requestJson = async <T>(
   path: string,
@@ -77,7 +91,7 @@ const requestJson = async <T>(
   },
 ): Promise<T> => {
   const headers = new Headers(options?.headers);
-  const token = requestOptions?.requiresAuth ? apiAuthConfig.getToken() : null;
+  const token = requestOptions?.requiresAuth ? getAuthToken() : null;
 
   if (token) {
     headers.set("Authorization", `Bearer ${token}`);
@@ -169,9 +183,10 @@ export const adminResetState = async (): Promise<AdminResetResponse> => {
 export const getTwitterLink = async (
   userId?: string,
 ): Promise<TwitterLinkResponse> => {
-  const url = userId
+  const requestedUserId = shouldSendUserId(userId) ? userId : undefined;
+  const url = requestedUserId
     ? `${apiContract.get.getTwitterLink.path}?user_id=${encodeURIComponent(
-        userId,
+        requestedUserId,
       )}`
     : apiContract.get.getTwitterLink.path;
 
@@ -182,6 +197,9 @@ export const getTwitterLink = async (
 
 export const getNodesAndPosts = async (
   limit?: number,
+  options?: {
+    signal?: AbortSignal;
+  },
 ): Promise<NodesAndPostsResponse> => {
   const url =
     typeof limit === "number"
@@ -190,9 +208,15 @@ export const getNodesAndPosts = async (
         )}`
       : apiContract.get.getNodesAndPosts.path;
 
-  return requestJson<NodesAndPostsResponse>(url, undefined, {
-    requiresAuth: true,
-  });
+  return requestJson<NodesAndPostsResponse>(
+    url,
+    {
+      signal: options?.signal,
+    },
+    {
+      requiresAuth: true,
+    },
+  );
 };
 
 export const syncTwitter = async (
@@ -204,9 +228,30 @@ export const syncTwitter = async (
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        user_id: options?.user_id,
+        user_id: shouldSendUserId(options?.user_id)
+          ? options?.user_id
+          : undefined,
         limit: options?.limit,
         force: options?.force,
+      }),
+    },
+    { requiresAuth: true },
+  );
+};
+
+export const syncTwitterFeed = async (
+  options?: TwitterFeedRequest,
+): Promise<TwitterFeedSyncResponse> => {
+  return requestJson<TwitterFeedSyncResponse>(
+    apiContract.post.syncTwitterFeed.path,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        user_id: shouldSendUserId(options?.user_id)
+          ? options?.user_id
+          : undefined,
+        limit: options?.limit,
       }),
     },
     { requiresAuth: true },
@@ -216,9 +261,10 @@ export const syncTwitter = async (
 export const getTwitterSyncStatus = async (
   userId?: string,
 ): Promise<TwitterSyncStatusResponse> => {
-  const url = userId
+  const requestedUserId = shouldSendUserId(userId) ? userId : undefined;
+  const url = requestedUserId
     ? `${apiContract.get.getTwitterSyncStatus.path}?user_id=${encodeURIComponent(
-        userId,
+        requestedUserId,
       )}`
     : apiContract.get.getTwitterSyncStatus.path;
   return requestJson<TwitterSyncStatusResponse>(url, undefined, {
@@ -236,12 +282,38 @@ export const clearQueue = async (): Promise<QueueClearResponse> => {
   );
 };
 
+export const getQueueStatus = async (
+  options?: QueueStatusRequest,
+): Promise<QueueStatusResponse> => {
+  const params = new URLSearchParams();
+  if (typeof options?.limit === "number" && Number.isFinite(options.limit)) {
+    params.set("limit", String(options.limit));
+  }
+  const requestedUserId = shouldSendUserId(options?.userId)
+    ? options?.userId
+    : undefined;
+  if (requestedUserId) {
+    params.set("user_id", requestedUserId);
+  }
+  const query = params.toString();
+  const url = query
+    ? `${apiContract.get.getQueueStatus.path}?${query}`
+    : apiContract.get.getQueueStatus.path;
+
+  return requestJson<QueueStatusResponse>(url, undefined, {
+    requiresAuth: true,
+  });
+};
+
 export const getUserProfile = async (
   options?: UserProfileRequest,
 ): Promise<UserProfileResponse> => {
   const params = new URLSearchParams();
-  if (options?.userId) {
-    params.set("user_id", options.userId);
+  const requestedUserId = shouldSendUserId(options?.userId)
+    ? options?.userId
+    : undefined;
+  if (requestedUserId) {
+    params.set("user_id", requestedUserId);
   }
   if (options?.refresh) {
     params.set("refresh", "true");

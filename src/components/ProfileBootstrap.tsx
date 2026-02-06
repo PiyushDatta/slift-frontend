@@ -21,7 +21,7 @@ export function ProfileBootstrap() {
     if (profileStatus === "loading") return;
     if (hasProfileInfo(profile)) return;
     hasTriggeredRef.current = true;
-    refreshProfile({ refresh: true });
+    refreshProfile();
   }, [nodesUpdated, profile, profileStatus, refreshProfile]);
 
   return null;

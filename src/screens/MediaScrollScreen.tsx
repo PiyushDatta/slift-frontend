@@ -27,6 +27,7 @@ import {
   isForYouNodeId,
   normalizeNodeKey,
 } from "../config/knowledgeNodes";
+import { VISIBLE_FOR_YOU_POSTS } from "../config/dataLimits";
 
 type Post = ApiPost;
 const DESKTOP_VISIBLE_TOPIC_COUNT = 4;
@@ -101,7 +102,7 @@ type FeedCardProps = {
   index: number;
   styles: ReturnType<typeof createMediaScrollStyles>;
   isDesktop: boolean;
-  activeTopicLabel: string;
+  topicLabel: string;
 };
 
 function FeedCard({
@@ -109,9 +110,12 @@ function FeedCard({
   index,
   styles,
   isDesktop,
-  activeTopicLabel,
+  topicLabel,
 }: FeedCardProps) {
   const reveal = useRef(new Animated.Value(0)).current;
+  const rawType =
+    typeof item.type === "string" ? item.type.trim() : String(item.type ?? "");
+  const hasTypeLabel = rawType.length > 0 && rawType.toLowerCase() !== "text";
 
   useEffect(() => {
     reveal.setValue(0);
@@ -157,7 +161,7 @@ function FeedCard({
         </View>
       </View>
       <View style={styles.postMetaRow}>
-        <Text style={styles.postMeta}>{item.type ?? "post"}</Text>
+        {hasTypeLabel ? <Text style={styles.postMeta}>{rawType}</Text> : null}
         <Text style={styles.postMetaSoft}>
           {formatPostTimestamp(item.timestamp)}
         </Text>
@@ -168,13 +172,13 @@ function FeedCard({
         <>
           <View style={styles.tagRow}>
             <View style={styles.tag}>
-              <Text style={styles.tagText}>{activeTopicLabel}</Text>
+              <Text style={styles.tagText}>{topicLabel}</Text>
             </View>
-            <View style={styles.tag}>
-              <Text style={styles.tagText}>
-                {(item.type ?? "Text").toString().toUpperCase()}
-              </Text>
-            </View>
+            {hasTypeLabel ? (
+              <View style={styles.tag}>
+                <Text style={styles.tagText}>{rawType.toUpperCase()}</Text>
+              </View>
+            ) : null}
           </View>
           <View style={styles.cardFooter}>
             <Text style={styles.footerStat}>{`Likes ${126 + index * 8}`}</Text>
@@ -286,10 +290,33 @@ export function MediaScrollScreen() {
         .flatMap((node) => node.posts ?? []) ?? [],
     [data],
   );
+  const topicLabelByPostId = useMemo(() => {
+    const map = new Map<string, string>();
+    const topicNodesSortedByWeight = (data?.nodes ?? [])
+      .filter((node) => !isForYouNodeId(node.id))
+      .sort((a, b) => (b.posts?.length ?? 0) - (a.posts?.length ?? 0));
+
+    for (const node of topicNodesSortedByWeight) {
+      const label = node.label ?? node.id;
+      for (const post of node.posts ?? []) {
+        if (!post?.id || map.has(post.id)) {
+          continue;
+        }
+        map.set(post.id, label);
+      }
+    }
+
+    return map;
+  }, [data]);
 
   const nodePosts = useMemo(() => {
     if (!selectedNodeId) return [];
-    if (isForYouSelected) return forYouNode?.posts ?? aggregatedPosts;
+    if (isForYouSelected) {
+      return (forYouNode?.posts ?? aggregatedPosts).slice(
+        0,
+        VISIBLE_FOR_YOU_POSTS,
+      );
+    }
     return (
       data?.nodes.find(
         (node) => normalizeNodeKey(node.id) === normalizedSelectedNodeId,
@@ -329,6 +356,13 @@ export function MediaScrollScreen() {
       ? "Focused topic stream"
       : "Realtime signal";
   const activeTopicLabel = selectedNodeLabel ?? FOR_YOU_NODE_LABEL;
+  const getTopicLabelForPost = (post: Post) => {
+    if (!isForYouSelected) {
+      return activeTopicLabel;
+    }
+    const sourceLabel = post.id ? topicLabelByPostId.get(post.id) : null;
+    return sourceLabel ?? activeTopicLabel;
+  };
   const topicCount = topicNodes.length;
   const selectedTopicNode = useMemo(
     () =>
@@ -682,7 +716,7 @@ export function MediaScrollScreen() {
                           index={index}
                           styles={styles}
                           isDesktop
-                          activeTopicLabel={activeTopicLabel}
+                          topicLabel={getTopicLabelForPost(item)}
                         />
                       ))
                     : renderEmptyState}
@@ -793,7 +827,7 @@ export function MediaScrollScreen() {
                 index={index}
                 styles={styles}
                 isDesktop={false}
-                activeTopicLabel={activeTopicLabel}
+                topicLabel={getTopicLabelForPost(item)}
               />
             )}
           />

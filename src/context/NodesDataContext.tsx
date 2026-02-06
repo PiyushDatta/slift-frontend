@@ -21,6 +21,13 @@ import {
   isForYouNodeId,
   normalizeNodeKey,
 } from "../config/knowledgeNodes";
+import {
+  BACKGROUND_FETCH_LIMIT,
+  BACKGROUND_REFRESH_INTERVAL_MS,
+  BACKGROUND_STOP_TOTAL_TOPIC_POSTS,
+  MAX_POSTS_PER_NODE,
+  MAX_TOPIC_NODES,
+} from "../config/dataLimits";
 
 type NodesDataStatus = "idle" | "loading" | "ready" | "error";
 
@@ -29,6 +36,7 @@ type NodesDataValue = {
   status: NodesDataStatus;
   refreshNodes: (options?: {
     limit?: number;
+    silent?: boolean;
   }) => Promise<NodesAndPostsResponse | null>;
   clearNodes: () => void;
   isCleared: boolean;
@@ -37,13 +45,18 @@ type NodesDataValue = {
 
 const NodesDataContext = createContext<NodesDataValue | undefined>(undefined);
 
+type InFlightNodesRequest = {
+  id: number;
+  limit?: number;
+  controller: AbortController;
+  promise: Promise<NodesAndPostsResponse | null>;
+};
+
 type NodesDataProviderProps = {
   children: React.ReactNode;
   initialData?: NodesAndPostsResponse;
   disableAutoLoad?: boolean;
 };
-
-const MAX_POSTS_PER_NODE = 30;
 
 const normalizeTimestamp = (value?: string | number | null): number | null => {
   if (value === null || value === undefined) return null;
@@ -62,6 +75,18 @@ const normalizeTimestamp = (value?: string | number | null): number | null => {
 };
 
 const getPostTimestamp = (post: ApiPost) => normalizeTimestamp(post.timestamp);
+
+const getNodeFreshness = (node: ApiNode) => {
+  const timestamps = (node.posts ?? [])
+    .map(getPostTimestamp)
+    .filter((value): value is number => typeof value === "number");
+
+  if (!timestamps.length) {
+    return 0;
+  }
+
+  return Math.max(...timestamps);
+};
 
 const mergePosts = (
   previous?: ApiPost[] | null,
@@ -188,15 +213,62 @@ const ensureForYouNode = (nodes: ApiNode[]) => {
   return [forYouNode, ...topicNodes];
 };
 
-const withForYouNode = (value: NodesAndPostsResponse | null) => {
+const limitTopicNodesAndEdges = (value: NodesAndPostsResponse) => {
+  const existingForYou = value.nodes.find((node) => isForYouNodeId(node.id));
+  const topicNodes = value.nodes.filter((node) => !isForYouNodeId(node.id));
+
+  const limitedTopicNodes = [...topicNodes]
+    .sort((a, b) => {
+      const postCountDiff = (b.posts?.length ?? 0) - (a.posts?.length ?? 0);
+      if (postCountDiff !== 0) {
+        return postCountDiff;
+      }
+
+      const freshnessDiff = getNodeFreshness(b) - getNodeFreshness(a);
+      if (freshnessDiff !== 0) {
+        return freshnessDiff;
+      }
+
+      return (a.label ?? a.id).localeCompare(b.label ?? b.id);
+    })
+    .slice(0, MAX_TOPIC_NODES);
+
+  const allowedNodeIds = new Set(
+    limitedTopicNodes.map((node) => normalizeNodeKey(node.id)),
+  );
+  if (existingForYou) {
+    allowedNodeIds.add(normalizeNodeKey(existingForYou.id));
+  }
+
+  const limitedEdges = value.edges.filter(
+    (edge) =>
+      allowedNodeIds.has(normalizeNodeKey(edge.from)) &&
+      allowedNodeIds.has(normalizeNodeKey(edge.to)),
+  );
+
+  const nodesWithForYou = ensureForYouNode(
+    existingForYou ? [existingForYou, ...limitedTopicNodes] : limitedTopicNodes,
+  );
+
+  return {
+    nodes: nodesWithForYou,
+    edges: limitedEdges,
+  };
+};
+
+const applyDataLimits = (value: NodesAndPostsResponse | null) => {
   if (!value?.nodes?.length) {
     return value;
   }
 
-  return {
+  return limitTopicNodesAndEdges({
     ...value,
     nodes: ensureForYouNode(value.nodes),
-  };
+  });
+};
+
+const withForYouNode = (value: NodesAndPostsResponse | null) => {
+  return applyDataLimits(value);
 };
 
 const mergeNodesData = (
@@ -212,11 +284,39 @@ const mergeNodesData = (
     return null;
   }
 
-  return {
-    nodes: ensureForYouNode(mergeNodes(prevNodes, nextNodes)),
+  return applyDataLimits({
+    nodes: mergeNodes(prevNodes, nextNodes),
     edges: mergeEdges(prevEdges, nextEdges),
-  };
+  });
 };
+
+const getTotalTopicPostCount = (value: NodesAndPostsResponse | null) => {
+  if (!value?.nodes?.length) {
+    return 0;
+  }
+
+  const uniquePostIds = new Set<string>();
+  let postsWithoutIds = 0;
+
+  for (const node of value.nodes) {
+    if (isForYouNodeId(node.id)) {
+      continue;
+    }
+
+    for (const post of node.posts ?? []) {
+      if (post?.id) {
+        uniquePostIds.add(post.id);
+      } else {
+        postsWithoutIds += 1;
+      }
+    }
+  }
+
+  return uniquePostIds.size + postsWithoutIds;
+};
+
+const shouldStopBackgroundPolling = (value: NodesAndPostsResponse | null) =>
+  getTotalTopicPostCount(value) >= BACKGROUND_STOP_TOTAL_TOPIC_POSTS;
 
 export function NodesDataProvider({
   children,
@@ -237,72 +337,127 @@ export function NodesDataProvider({
   );
   const requestIdRef = useRef(0);
   const dataRef = useRef<NodesAndPostsResponse | null>(seededInitialData);
+  const backgroundTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const inFlightRequestRef = useRef<InFlightNodesRequest | null>(null);
 
   useEffect(() => {
     dataRef.current = data;
   }, [data]);
 
+  const clearBackgroundTimer = useCallback(() => {
+    if (backgroundTimerRef.current) {
+      clearTimeout(backgroundTimerRef.current);
+      backgroundTimerRef.current = null;
+    }
+  }, []);
+
+  const cancelInFlightRequest = useCallback(() => {
+    if (inFlightRequestRef.current) {
+      inFlightRequestRef.current.controller.abort();
+      inFlightRequestRef.current = null;
+    }
+  }, []);
+
   const refreshNodes = useCallback(
     async (options?: {
       limit?: number;
+      silent?: boolean;
     }): Promise<NodesAndPostsResponse | null> => {
+      const requestLimit =
+        typeof options?.limit === "number" ? options.limit : undefined;
+      const activeRequest = inFlightRequestRef.current;
+      if (activeRequest) {
+        if (activeRequest.limit === requestLimit) {
+          return activeRequest.promise;
+        }
+        activeRequest.controller.abort();
+        inFlightRequestRef.current = null;
+      }
+
       const requestId = requestIdRef.current + 1;
       requestIdRef.current = requestId;
-      setStatus("loading");
-      try {
-        const response = await getNodesAndPosts(options?.limit);
-        if (requestId !== requestIdRef.current) {
-          return null;
+      const controller = new AbortController();
+      const requestPromise = (async () => {
+        const shouldSetLoading =
+          !options?.silent || !dataRef.current?.nodes?.length;
+        if (shouldSetLoading) {
+          setStatus("loading");
         }
-        if (typeof __DEV__ !== "undefined" && __DEV__) {
-          // eslint-disable-next-line no-console
-          console.log("[nodes] get_nodes_and_posts response", response);
-        }
-        const merged = mergeNodesData(dataRef.current, response);
-        if (merged?.nodes.length) {
-          setData(merged);
-          dataRef.current = merged;
+        try {
+          const response = await getNodesAndPosts(requestLimit, {
+            signal: controller.signal,
+          });
+          if (requestId !== requestIdRef.current) {
+            return null;
+          }
+          if (typeof __DEV__ !== "undefined" && __DEV__) {
+            // eslint-disable-next-line no-console
+            console.log("[nodes] get_nodes_and_posts response", response);
+          }
+          const merged = mergeNodesData(dataRef.current, response);
+          if (merged?.nodes.length) {
+            setData(merged);
+            dataRef.current = merged;
+            setStatus("ready");
+            setIsCleared(false);
+            setSkipAutoLoad(false);
+            setLastUpdated(Date.now());
+            return merged;
+          }
+
+          if (!dataRef.current?.nodes?.length) {
+            setData(null);
+            dataRef.current = null;
+            setStatus("error");
+            setLastUpdated(Date.now());
+            return null;
+          }
+
+          setData(dataRef.current);
           setStatus("ready");
-          setIsCleared(false);
-          setSkipAutoLoad(false);
           setLastUpdated(Date.now());
-          return merged;
-        }
+          return dataRef.current;
+        } catch {
+          if (controller.signal.aborted) {
+            return null;
+          }
+          if (requestId !== requestIdRef.current) {
+            return null;
+          }
+          if (!dataRef.current?.nodes?.length) {
+            setData(null);
+            dataRef.current = null;
+            setStatus("error");
+            setLastUpdated(Date.now());
+            return null;
+          }
 
-        if (!dataRef.current?.nodes?.length) {
-          setData(null);
-          dataRef.current = null;
-          setStatus("error");
+          setData(dataRef.current);
+          setStatus("ready");
           setLastUpdated(Date.now());
-          return null;
+          return dataRef.current;
+        } finally {
+          if (inFlightRequestRef.current?.id === requestId) {
+            inFlightRequestRef.current = null;
+          }
         }
+      })();
 
-        setData(dataRef.current);
-        setStatus("ready");
-        setLastUpdated(Date.now());
-        return dataRef.current;
-      } catch {
-        if (requestId !== requestIdRef.current) {
-          return null;
-        }
-        if (!dataRef.current?.nodes?.length) {
-          setData(null);
-          dataRef.current = null;
-          setStatus("error");
-          setLastUpdated(Date.now());
-          return null;
-        }
+      inFlightRequestRef.current = {
+        id: requestId,
+        limit: requestLimit,
+        controller,
+        promise: requestPromise,
+      };
 
-        setData(dataRef.current);
-        setStatus("ready");
-        setLastUpdated(Date.now());
-        return dataRef.current;
-      }
+      return requestPromise;
     },
     [],
   );
 
   const clearNodes = useCallback(() => {
+    cancelInFlightRequest();
+    clearBackgroundTimer();
     requestIdRef.current += 1;
     setData(null);
     dataRef.current = null;
@@ -310,7 +465,7 @@ export function NodesDataProvider({
     setIsCleared(true);
     setSkipAutoLoad(true);
     setLastUpdated(Date.now());
-  }, []);
+  }, [cancelInFlightRequest, clearBackgroundTimer]);
 
   useEffect(() => {
     if (disableAutoLoad) return;
@@ -318,6 +473,69 @@ export function NodesDataProvider({
     if (data) return;
     refreshNodes();
   }, [data, disableAutoLoad, refreshNodes, skipAutoLoad]);
+
+  useEffect(() => {
+    if (disableAutoLoad || skipAutoLoad) {
+      clearBackgroundTimer();
+      return;
+    }
+
+    let cancelled = false;
+    let inFlight = false;
+
+    const schedule = (delayMs: number) => {
+      if (cancelled) {
+        return;
+      }
+
+      clearBackgroundTimer();
+      backgroundTimerRef.current = setTimeout(() => {
+        void poll();
+      }, delayMs);
+    };
+
+    const poll = async () => {
+      if (cancelled || inFlight) {
+        return;
+      }
+
+      inFlight = true;
+      const refreshed = await refreshNodes({
+        limit: BACKGROUND_FETCH_LIMIT,
+        silent: true,
+      }).catch(() => null);
+      inFlight = false;
+
+      if (cancelled) {
+        return;
+      }
+
+      const current = refreshed ?? dataRef.current;
+      if (shouldStopBackgroundPolling(current)) {
+        clearBackgroundTimer();
+        return;
+      }
+      schedule(BACKGROUND_REFRESH_INTERVAL_MS);
+    };
+
+    if (shouldStopBackgroundPolling(dataRef.current)) {
+      clearBackgroundTimer();
+      return;
+    }
+
+    schedule(BACKGROUND_REFRESH_INTERVAL_MS);
+
+    return () => {
+      cancelled = true;
+      clearBackgroundTimer();
+    };
+  }, [clearBackgroundTimer, disableAutoLoad, refreshNodes, skipAutoLoad]);
+
+  useEffect(() => {
+    return () => {
+      cancelInFlightRequest();
+    };
+  }, [cancelInFlightRequest]);
 
   const value = useMemo(
     () => ({ data, status, refreshNodes, clearNodes, isCleared, lastUpdated }),

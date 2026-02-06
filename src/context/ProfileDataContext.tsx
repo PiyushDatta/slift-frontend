@@ -51,7 +51,9 @@ export function ProfileDataProvider({
       userId?: string;
       refresh?: boolean;
     }): Promise<UserProfileResponse | null> => {
-      setStatus("loading");
+      if (!data) {
+        setStatus("loading");
+      }
       try {
         const response = await getUserProfile({
           userId: options?.userId,
@@ -62,13 +64,18 @@ export function ProfileDataProvider({
         setLastUpdated(Date.now());
         return response ?? null;
       } catch {
-        setData(null);
-        setStatus("error");
+        if (!data) {
+          setData(null);
+          setStatus("error");
+        } else {
+          setData(data);
+          setStatus("ready");
+        }
         setLastUpdated(Date.now());
-        return null;
+        return data ?? null;
       }
     },
-    [],
+    [data],
   );
 
   useEffect(() => {

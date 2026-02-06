@@ -1,4 +1,5 @@
 import { Linking, Platform } from "react-native";
+import { toTrustedAuthUrl } from "./urlSecurity";
 
 export type AuthPopupHandle = {
   close?: () => void;
@@ -16,6 +17,7 @@ type BrowserWindowHandle = {
     target?: string,
     features?: string,
   ) => AuthPopupHandle | null;
+  focus?: () => void;
   location?: {
     href?: string;
   };
@@ -89,41 +91,51 @@ export const getTwitterAuthUrlFromSyncResponse = async (
   resolveTwitterLink: () => Promise<{ auth_url?: unknown }>,
 ): Promise<string | null> => {
   const responseAuthUrl = getSyncAuthUrl(syncResponse);
-  if (responseAuthUrl) {
-    return responseAuthUrl;
+  const trustedResponseAuthUrl = responseAuthUrl
+    ? toTrustedAuthUrl(responseAuthUrl)
+    : null;
+  if (trustedResponseAuthUrl) {
+    return trustedResponseAuthUrl;
   }
 
   const linkResponse = await resolveTwitterLink();
-  return asNonEmptyString(linkResponse?.auth_url);
+  const linkAuthUrl = asNonEmptyString(linkResponse?.auth_url);
+  return linkAuthUrl ? toTrustedAuthUrl(linkAuthUrl) : null;
 };
 
 export const openAuthUrl = async (
   authUrl: string,
   popup: AuthPopupHandle | null,
 ): Promise<AuthPopupHandle | null> => {
+  const trustedAuthUrl = toTrustedAuthUrl(authUrl);
+  if (!trustedAuthUrl) {
+    throw new Error("Unsafe auth URL.");
+  }
+
   const browserWindow = getBrowserWindow();
   if (browserWindow) {
-    if (popup?.location) {
-      popup.location.href = authUrl;
-      return popup;
-    }
-
-    if (browserWindow.open) {
-      const nextTab = browserWindow.open(authUrl, "_blank");
-      if (nextTab) {
-        nextTab.focus?.();
-        return nextTab;
+    let authTab = popup;
+    if (!authTab && browserWindow.open) {
+      authTab = browserWindow.open("about:blank", "_blank");
+      try {
+        if (authTab) {
+          authTab.opener = null;
+        }
+      } catch {
+        // Best-effort hardening only.
       }
     }
 
-    if (browserWindow.location) {
-      // Last resort if popup/new-tab is blocked by browser settings.
-      browserWindow.location.href = authUrl;
-      return null;
+    if (authTab?.location) {
+      authTab.location.href = trustedAuthUrl;
+      authTab.focus?.();
+      return authTab;
     }
+
+    throw new Error("Unable to open auth popup window.");
   }
 
-  await Linking.openURL(authUrl);
+  await Linking.openURL(trustedAuthUrl);
   return null;
 };
 
@@ -166,6 +178,16 @@ const forceClosePopup = (popup: AuthPopupHandle | null) => {
       }
     }, delay);
   }
+
+  const browserWindow = getBrowserWindow();
+  const focusDelay = closeDelaysMs[closeDelaysMs.length - 1] + 120;
+  setTimeout(() => {
+    try {
+      browserWindow?.focus?.();
+    } catch {
+      // Best effort only.
+    }
+  }, focusDelay);
 };
 
 export const waitForTwitterAuthCompletion = async (

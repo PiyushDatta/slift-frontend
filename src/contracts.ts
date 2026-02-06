@@ -24,6 +24,9 @@ export const apiContract = {
       path: "/twitter/sync/status",
       responseRef: "#/components/schemas/TwitterSyncStatusResponse",
     },
+    getQueueStatus: {
+      path: "/queue/status",
+    },
     getUserProfile: {
       path: "/user/profile",
       responseRef: "#/components/schemas/UserProfileResponse",
@@ -41,6 +44,10 @@ export const apiContract = {
     syncTwitter: {
       path: "/twitter/sync",
       requestRef: "#/components/schemas/TwitterSyncRequest",
+    },
+    syncTwitterFeed: {
+      path: "/twitter/feed/sync",
+      requestRef: "#/components/schemas/TwitterFeedRequest",
     },
     clearQueue: {
       path: "/queue/clear",
@@ -100,6 +107,7 @@ export type AdminResetResponse = {
   auth_state_reset: boolean;
   queue_reset: boolean;
   nodes_reset: boolean;
+  posts_reset: boolean;
   profile_reset: boolean;
   sync_reset: boolean;
   disconnected_accounts: number;
@@ -163,6 +171,13 @@ export type TwitterSyncRequest = {
 
 export type TwitterSyncResponse = Record<string, unknown>;
 
+export type TwitterFeedRequest = {
+  user_id?: string;
+  limit?: number;
+};
+
+export type TwitterFeedSyncResponse = Record<string, unknown>;
+
 export type TwitterSyncStatusResponse = {
   running?: boolean | null;
   requires_auth?: boolean | null;
@@ -171,6 +186,13 @@ export type TwitterSyncStatusResponse = {
 };
 
 export type QueueClearResponse = Record<string, unknown>;
+
+export type QueueStatusResponse = Record<string, unknown>;
+
+export type QueueStatusRequest = {
+  limit?: number;
+  userId?: string;
+};
 
 export type UserProfileResponse = {
   name?: string | null;

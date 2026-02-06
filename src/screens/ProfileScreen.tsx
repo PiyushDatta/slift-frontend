@@ -37,7 +37,9 @@ import { AppBackground } from "../components/AppBackground";
 import { createProfileScreenStyles } from "../styles/ProfileScreenStyles";
 import { theme } from "../styles/theme";
 import { SettingsSizeSelector } from "../components/SettingsSizeSelector";
+import { getSyncFetchLimit } from "../config/dataLimits";
 import { isForYouNodeId } from "../config/knowledgeNodes";
+import { waitForTwitterGraphReady } from "../utils/twitterSyncStatus";
 import {
   closeAuthPopup,
   getSyncRequiresAuth,
@@ -73,9 +75,8 @@ export function ProfileScreen() {
   const latestNodesRef = useRef(nodesData);
   const syncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const SYNC_POLL_INTERVAL_MS = 3000;
-  const MAX_SYNC_ATTEMPTS = 8;
-  const MAX_RUNNING_ATTEMPTS = 20;
+  const SYNC_FETCH_INTERVAL_MS = 3000;
+  const MAX_SYNC_STATUS_POLLS = 10;
   const MAX_POST_FETCH_ATTEMPTS = 4;
 
   useEffect(() => {
@@ -131,40 +132,14 @@ export function ProfileScreen() {
     clearSyncTimer();
     const baselineSignature = profileSignature(latestProfileRef.current);
     const baselineNodesCount = latestNodesRef.current?.nodes?.length ?? 0;
-    let requiresAuthStreak = 0;
-    let syncReady = false;
-
-    for (let attempt = 0; attempt < MAX_RUNNING_ATTEMPTS; attempt += 1) {
-      const status = await getTwitterSyncStatus().catch(() => null);
-      const isRunning = status?.running === true;
-
-      if (status?.requires_auth === true) {
-        requiresAuthStreak += 1;
-      } else {
-        requiresAuthStreak = 0;
-      }
-
-      const canConfirmAuthRequired = requiresAuthStreak >= 3 && attempt >= 2;
-      if (canConfirmAuthRequired) {
-        return { authRequired: true, updated: false };
-      }
-
-      const backendReady = !isRunning && status?.requires_auth !== true;
-      if (backendReady && attempt >= 2) {
-        syncReady = true;
-        break;
-      }
-
-      if (!isRunning && attempt >= MAX_SYNC_ATTEMPTS) {
-        break;
-      }
-
-      await new Promise<void>((resolve) => {
-        syncTimerRef.current = setTimeout(resolve, SYNC_POLL_INTERVAL_MS);
-      });
+    const readiness = await waitForTwitterGraphReady(getTwitterSyncStatus, {
+      maxPolls: MAX_SYNC_STATUS_POLLS,
+    });
+    if (readiness.state === "auth_required") {
+      return { authRequired: true, updated: false };
     }
 
-    if (!syncReady) {
+    if (readiness.state !== "ready") {
       return { authRequired: false, updated: false };
     }
 
@@ -173,14 +148,18 @@ export function ProfileScreen() {
       fetchAttempt < MAX_POST_FETCH_ATTEMPTS;
       fetchAttempt += 1
     ) {
+      const fetchLimit = getSyncFetchLimit(fetchAttempt);
       const shouldAwaitProfile = hasProfile(latestProfileRef.current);
-      const nodesResponse = await refreshNodes().catch(() => null);
+      const nodesResponse = await refreshNodes({
+        limit: fetchLimit,
+        silent: fetchAttempt > 0,
+      }).catch(() => null);
       let profileData = null;
 
       if (shouldAwaitProfile) {
-        profileData = await refreshProfile({ refresh: true }).catch(() => null);
+        profileData = await refreshProfile().catch(() => null);
       } else {
-        refreshProfile({ refresh: true }).catch(() => {});
+        refreshProfile().catch(() => {});
       }
 
       const nextSignature = profileSignature(
@@ -202,7 +181,7 @@ export function ProfileScreen() {
       }
 
       await new Promise<void>((resolve) => {
-        syncTimerRef.current = setTimeout(resolve, SYNC_POLL_INTERVAL_MS);
+        syncTimerRef.current = setTimeout(resolve, SYNC_FETCH_INTERVAL_MS);
       });
     }
 
@@ -211,9 +190,8 @@ export function ProfileScreen() {
     clearSyncTimer,
     hasProfile,
     MAX_POST_FETCH_ATTEMPTS,
-    MAX_RUNNING_ATTEMPTS,
-    MAX_SYNC_ATTEMPTS,
-    SYNC_POLL_INTERVAL_MS,
+    MAX_SYNC_STATUS_POLLS,
+    SYNC_FETCH_INTERVAL_MS,
     refreshNodes,
     refreshProfile,
     profileSignature,
@@ -276,7 +254,7 @@ export function ProfileScreen() {
       }
       await Promise.all([
         refreshProfile({ refresh: true }),
-        refreshNodes(),
+        refreshNodes({ limit: getSyncFetchLimit(MAX_POST_FETCH_ATTEMPTS) }),
       ]).catch(() => {});
     } catch {
       closeAuthPopup(popup);
