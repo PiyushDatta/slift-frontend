@@ -1,0 +1,39 @@
+{
+  "name": "slift",
+  "version": "0.1.0",
+  "private": true,
+  "main": "entry.js",
+  "scripts": {
+    "start": "bunx expo start",
+    "android": "bunx expo start --android",
+    "ios": "bunx expo start --ios",
+    "web": "bunx expo start --web",
+    "clean": "node -e \"const fs=require('fs');const rm=(p)=>fs.rmSync(p,{recursive:true,force:true});['node_modules','.expo','bun.lock'].forEach(rm);\"",
+    "test:contract": "bun test tests/openapi-contract.test.ts",
+    "test": "bun test --preload tests/setup.ts",
+    "format": "bunx prettier --write ."
+  },
+  "dependencies": {
+    "@expo/metro-runtime": "~6.1.2",
+    "@expo/vector-icons": "^15.0.3",
+    "@react-native-community/slider": "^5.1.2",
+    "@react-navigation/bottom-tabs": "^7.12.0",
+    "@react-navigation/native": "^7.1.28",
+    "expo": "~54.0.33",
+    "expo-blur": "^15.0.8",
+    "expo-secure-store": "^15.0.8",
+    "react": "19.1.0",
+    "react-dom": "19.1.0",
+    "react-native": "0.81.5",
+    "react-native-safe-area-context": "~5.6.0",
+    "react-native-screens": "~4.16.0",
+    "react-native-web": "^0.21.0"
+  },
+  "devDependencies": {
+    "@testing-library/react-native": "^13.3.3",
+    "@types/react": "~19.1.10",
+    "prettier": "3.6.2",
+    "react-test-renderer": "19.1.0",
+    "typescript": "5.9.3"
+  }
+}
