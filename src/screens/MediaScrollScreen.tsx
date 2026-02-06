@@ -214,8 +214,8 @@ export function MediaScrollScreen({
   const [desktopView, setDesktopView] = useState<"feed" | "graph">("feed");
   const [isTopicListExpanded, setIsTopicListExpanded] = useState(false);
 
-  const routeNodeId = route.params?.nodeId;
-  const routeNodeLabel = route.params?.nodeLabel;
+  const routeNodeId = route?.params?.nodeId;
+  const routeNodeLabel = route?.params?.nodeLabel;
   const forYouNode = useMemo(
     () => data?.nodes.find((node) => isForYouNodeId(node.id)) ?? null,
     [data],
