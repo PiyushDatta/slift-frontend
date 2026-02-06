@@ -10,7 +10,7 @@ import {
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { RouteProp, useNavigation, useRoute } from "@react-navigation/native";
+import { RouteProp } from "@react-navigation/native";
 
 import { useSettings } from "../context/SettingsContext";
 import { useKnowledgeSelection } from "../context/KnowledgeSelectionContext";
@@ -31,6 +31,14 @@ import { VISIBLE_FOR_YOU_POSTS } from "../config/dataLimits";
 
 type Post = ApiPost;
 const DESKTOP_VISIBLE_TOPIC_COUNT = 4;
+type MediaScrollScreenRoute = RouteProp<TabsParamList, "Main">;
+type MediaScrollScreenNavigation = {
+  navigate?: (screen: keyof TabsParamList, params?: unknown) => void;
+};
+type MediaScrollScreenProps = {
+  route?: MediaScrollScreenRoute;
+  navigation?: MediaScrollScreenNavigation;
+};
 
 const renderMedia = (
   post: Post,
@@ -191,11 +199,12 @@ function FeedCard({
   );
 }
 
-export function MediaScrollScreen() {
+export function MediaScrollScreen({
+  route,
+  navigation,
+}: MediaScrollScreenProps = {}) {
   const { size } = useSettings();
   const styles = useMemo(createMediaScrollStyles, [size]);
-  const route = useRoute<RouteProp<TabsParamList, "Main">>();
-  const navigation = useNavigation<any>();
   const { selectedNode, setSelectedNode } = useKnowledgeSelection();
   const { data, status: nodesStatus, isCleared } = useNodesData();
   const { data: profile } = useProfileData();
@@ -670,7 +679,7 @@ export function MediaScrollScreen() {
                     key={entry.label}
                     onPress={() => {
                       if (entry.action === "profile") {
-                        navigation.navigate("Profile");
+                        navigation?.navigate?.("Profile");
                         return;
                       }
                       setDesktopView(
