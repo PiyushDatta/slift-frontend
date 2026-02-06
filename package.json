@@ -8,6 +8,7 @@
     "android": "bunx expo start --android",
     "ios": "bunx expo start --ios",
     "web": "bunx expo start --web",
+    "build:web": "bunx expo export --platform web",
     "clean": "node -e \"const fs=require('fs');const rm=(p)=>fs.rmSync(p,{recursive:true,force:true});['node_modules','.expo','bun.lock'].forEach(rm);\"",
     "test:contract": "bun test tests/openapi-contract.test.ts",
     "test": "bun test --preload tests/setup.ts",
