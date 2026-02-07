@@ -10,6 +10,8 @@
 ## NOTE
 We have turned off frontend and backend. But if you message us we can set it up again, easily.
 
+https://devpost.com/software/slift
+
 ## Install And Run
 
 1. `bun install`
