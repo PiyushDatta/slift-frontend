@@ -341,7 +341,7 @@ export function MediaScrollScreen({
       ? (webWindowWidth ?? measuredWindowWidth)
       : measuredWindowWidth;
   const isDesktop = windowWidth >= 1180;
-  const showRightRail = windowWidth >= 1420;
+  const showInsightsRail = windowWidth >= 1420;
   const [desktopView, setDesktopView] = useState<"feed" | "graph">("feed");
   const [isTopicListExpanded, setIsTopicListExpanded] = useState(false);
 
@@ -911,8 +911,6 @@ export function MediaScrollScreen({
             </View>
 
             <View style={styles.feedColumn}>
-              {renderDesktopControls(false)}
-
               {desktopView === "feed" ? (
                 <View testID="media-feed" style={styles.desktopList}>
                   {posts.length > 0
@@ -943,42 +941,45 @@ export function MediaScrollScreen({
               )}
             </View>
 
-            {showRightRail ? (
-              <View style={styles.rightRail}>
-                <View style={styles.panelCard}>
-                  <Text style={styles.panelTitle}>Trending Now</Text>
-                  {trendingNow.map((item) => (
-                    <View key={item.label} style={styles.panelRow}>
-                      <View>
-                        <Text style={styles.panelValue}>{item.label}</Text>
-                        <Text
-                          style={styles.panelLabel}
-                        >{`${item.posts} posts`}</Text>
+            <View style={styles.rightRail}>
+              {renderDesktopControls(true)}
+              {showInsightsRail ? (
+                <>
+                  <View style={styles.panelCard}>
+                    <Text style={styles.panelTitle}>Trending Now</Text>
+                    {trendingNow.map((item) => (
+                      <View key={item.label} style={styles.panelRow}>
+                        <View>
+                          <Text style={styles.panelValue}>{item.label}</Text>
+                          <Text
+                            style={styles.panelLabel}
+                          >{`${item.posts} posts`}</Text>
+                        </View>
+                        <Text style={styles.panelTrendValue}>{item.pct}</Text>
                       </View>
-                      <Text style={styles.panelTrendValue}>{item.pct}</Text>
-                    </View>
-                  ))}
-                </View>
+                    ))}
+                  </View>
 
-                <View style={styles.panelCard}>
-                  <Text style={styles.panelTitle}>Your Activity</Text>
-                  <View style={styles.panelRow}>
-                    <Text style={styles.panelLabel}>Posts this week</Text>
-                    <Text style={styles.panelValue}>{posts.length}</Text>
+                  <View style={styles.panelCard}>
+                    <Text style={styles.panelTitle}>Your Activity</Text>
+                    <View style={styles.panelRow}>
+                      <Text style={styles.panelLabel}>Posts this week</Text>
+                      <Text style={styles.panelValue}>{posts.length}</Text>
+                    </View>
+                    <View style={styles.panelRow}>
+                      <Text style={styles.panelLabel}>Engagement rate</Text>
+                      <Text style={styles.panelTrendValue}>+24%</Text>
+                    </View>
+                    <View style={styles.panelRow}>
+                      <Text style={styles.panelLabel}>Topics followed</Text>
+                      <Text style={styles.panelValue}>
+                        {Math.max(topicCount, 1)}
+                      </Text>
+                    </View>
                   </View>
-                  <View style={styles.panelRow}>
-                    <Text style={styles.panelLabel}>Engagement rate</Text>
-                    <Text style={styles.panelTrendValue}>+24%</Text>
-                  </View>
-                  <View style={styles.panelRow}>
-                    <Text style={styles.panelLabel}>Topics followed</Text>
-                    <Text style={styles.panelValue}>
-                      {Math.max(topicCount, 1)}
-                    </Text>
-                  </View>
-                </View>
-              </View>
-            ) : null}
+                </>
+              ) : null}
+            </View>
           </View>
         </ScrollView>
       ) : (
