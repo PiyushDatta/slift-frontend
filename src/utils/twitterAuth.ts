@@ -45,13 +45,61 @@ const asNonEmptyString = (value: unknown): string | null => {
 
 const asBooleanTrue = (value: unknown): boolean => value === true;
 
+const AUTH_POPUP_LOADING_HTML = `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Connecting to Twitter</title>
+    <style>
+      :root { color-scheme: dark; }
+      body {
+        margin: 0;
+        min-height: 100vh;
+        display: grid;
+        place-items: center;
+        background: #0f1722;
+        color: #e5edf8;
+        font-family: -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, Arial, sans-serif;
+      }
+      .card {
+        padding: 24px 20px;
+        border: 1px solid rgba(143, 176, 219, 0.35);
+        border-radius: 14px;
+        background: rgba(21, 31, 44, 0.92);
+        text-align: center;
+      }
+      .title {
+        margin: 0 0 8px;
+        font-size: 16px;
+        font-weight: 700;
+      }
+      .subtitle {
+        margin: 0;
+        font-size: 13px;
+        color: #a5b8d1;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="card">
+      <p class="title">Preparing Twitter authorization...</p>
+      <p class="subtitle">This window will redirect automatically.</p>
+    </div>
+  </body>
+</html>`;
+
+const AUTH_POPUP_LOADING_URL = `data:text/html;charset=utf-8,${encodeURIComponent(
+  AUTH_POPUP_LOADING_HTML,
+)}`;
+
 export const openAuthPopup = (): AuthPopupHandle | null => {
   const browserWindow = getBrowserWindow();
   if (!browserWindow?.open) {
     return null;
   }
 
-  const popup = browserWindow.open("about:blank", "_blank");
+  const popup = browserWindow.open(AUTH_POPUP_LOADING_URL, "_blank");
   try {
     if (popup) {
       popup.opener = null;
@@ -60,7 +108,6 @@ export const openAuthPopup = (): AuthPopupHandle | null => {
     // Best-effort hardening only.
   }
 
-  popup?.focus?.();
   return popup;
 };
 
@@ -116,7 +163,7 @@ export const openAuthUrl = async (
   if (browserWindow) {
     let authTab = popup;
     if (!authTab && browserWindow.open) {
-      authTab = browserWindow.open("about:blank", "_blank");
+      authTab = browserWindow.open(AUTH_POPUP_LOADING_URL, "_blank");
       try {
         if (authTab) {
           authTab.opener = null;

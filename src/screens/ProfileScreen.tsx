@@ -20,6 +20,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { useNavigation } from "@react-navigation/native";
 
 import {
+  ApiRequestError,
   adminResetState,
   clearQueue,
   deleteAuthAccount,
@@ -49,6 +50,9 @@ import {
   type AuthPopupHandle,
   waitForTwitterAuthCompletion,
 } from "../utils/twitterAuth";
+
+const AUTH_LINK_UNAVAILABLE_MESSAGE =
+  "Twitter auth link unavailable right now. Please try again in a moment.";
 
 export function ProfileScreen() {
   const { size } = useSettings();
@@ -206,18 +210,30 @@ export function ProfileScreen() {
       const requiresAuth = getSyncRequiresAuth(syncResponse);
 
       if (requiresAuth) {
-        const authUrl = await getTwitterAuthUrlFromSyncResponse(
-          syncResponse,
-          getTwitterLink,
-        );
+        let authUrl: string | null = null;
+        try {
+          authUrl = await getTwitterAuthUrlFromSyncResponse(
+            syncResponse,
+            getTwitterLink,
+          );
+        } catch (error) {
+          closeAuthPopup(popup);
+          popup = null;
+          if (error instanceof ApiRequestError && error.status === 502) {
+            Alert.alert("Sync unavailable", AUTH_LINK_UNAVAILABLE_MESSAGE);
+            return;
+          }
+          Alert.alert(
+            "Sync requires auth",
+            "Could not retrieve Twitter authorization link.",
+          );
+          return;
+        }
 
         if (!authUrl) {
           closeAuthPopup(popup);
           popup = null;
-          Alert.alert(
-            "Sync requires auth",
-            "No Twitter authorization URL was returned.",
-          );
+          Alert.alert("Sync unavailable", AUTH_LINK_UNAVAILABLE_MESSAGE);
           return;
         }
 
@@ -228,6 +244,7 @@ export function ProfileScreen() {
           getTwitterSyncStatus,
         );
         if (!authResult.authorized) {
+          closeAuthPopup(authWindow);
           Alert.alert(
             "Sync requires auth",
             authResult.error ?? "Twitter authorization did not complete.",
@@ -256,9 +273,13 @@ export function ProfileScreen() {
         refreshProfile({ refresh: true }),
         refreshNodes({ limit: getSyncFetchLimit(MAX_POST_FETCH_ATTEMPTS) }),
       ]).catch(() => {});
-    } catch {
+    } catch (error) {
       closeAuthPopup(popup);
-      Alert.alert("Sync failed", "Could not queue Twitter sync.");
+      if (error instanceof ApiRequestError && error.status === 502) {
+        Alert.alert("Sync unavailable", AUTH_LINK_UNAVAILABLE_MESSAGE);
+      } else {
+        Alert.alert("Sync failed", "Could not queue Twitter sync.");
+      }
     } finally {
       setIsSyncing(false);
     }

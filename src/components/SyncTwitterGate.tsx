@@ -2,7 +2,12 @@ import React, { useCallback, useMemo, useState } from "react";
 import { ActivityIndicator, Pressable, Text, View } from "react-native";
 import { BlurView } from "expo-blur";
 
-import { getTwitterLink, getTwitterSyncStatus, syncTwitter } from "../api";
+import {
+  ApiRequestError,
+  getTwitterLink,
+  getTwitterSyncStatus,
+  syncTwitter,
+} from "../api";
 import { useNodesData } from "../context/NodesDataContext";
 import { useProfileData } from "../context/ProfileDataContext";
 import { useSettings } from "../context/SettingsContext";
@@ -27,6 +32,9 @@ type SyncTwitterGateProps = {
 const DATA_REFRESH_INTERVAL_MS = 2500;
 const MAX_POST_FETCH_ATTEMPTS = 4;
 const MAX_SYNC_STATUS_POLLS = 10;
+
+const AUTH_LINK_UNAVAILABLE_MESSAGE =
+  "Twitter auth link unavailable right now. Please try again in a moment.";
 
 const sleep = (ms: number) =>
   new Promise<void>((resolve) => {
@@ -117,17 +125,27 @@ export function SyncTwitterGate({ children }: SyncTwitterGateProps) {
       const requiresAuth = getSyncRequiresAuth(syncResponse);
 
       if (requiresAuth) {
-        const authUrl = await getTwitterAuthUrlFromSyncResponse(
-          syncResponse,
-          getTwitterLink,
-        );
+        let authUrl: string | null = null;
+        try {
+          authUrl = await getTwitterAuthUrlFromSyncResponse(
+            syncResponse,
+            getTwitterLink,
+          );
+        } catch (error) {
+          closeAuthPopup(popup);
+          popup = null;
+          if (error instanceof ApiRequestError && error.status === 502) {
+            setErrorMessage(AUTH_LINK_UNAVAILABLE_MESSAGE);
+            return;
+          }
+          setErrorMessage("Could not retrieve Twitter authorization link.");
+          return;
+        }
 
         if (!authUrl) {
           closeAuthPopup(popup);
           popup = null;
-          setErrorMessage(
-            "Twitter authorization is required, but no auth URL was returned.",
-          );
+          setErrorMessage(AUTH_LINK_UNAVAILABLE_MESSAGE);
           return;
         }
 
@@ -138,6 +156,7 @@ export function SyncTwitterGate({ children }: SyncTwitterGateProps) {
           getTwitterSyncStatus,
         );
         if (!authResult.authorized) {
+          closeAuthPopup(authWindow);
           setErrorMessage(
             authResult.error ?? "Twitter authorization did not complete.",
           );
@@ -149,9 +168,13 @@ export function SyncTwitterGate({ children }: SyncTwitterGateProps) {
       popup = null;
       setIsGateDismissed(true);
       void continueSyncInBackground();
-    } catch {
+    } catch (error) {
       closeAuthPopup(popup);
-      setErrorMessage("Could not start Twitter sync. Please try again.");
+      if (error instanceof ApiRequestError && error.status === 502) {
+        setErrorMessage(AUTH_LINK_UNAVAILABLE_MESSAGE);
+      } else {
+        setErrorMessage("Could not start Twitter sync. Please try again.");
+      }
     } finally {
       setIsSyncing(false);
     }
