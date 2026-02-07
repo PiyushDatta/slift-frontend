@@ -1,8 +1,11 @@
 # Slift Frontend
 
-## Demo
+## Click below to watch demo
 
-[![Watch the demo](slift_thumbnail.png)](https://www.youtube.com/watch?v=5CoxSsQg-L8)
+<a href="https://www.youtube.com/watch?v=5CoxSsQg-L8">
+  <img src="slift_thumbnail.png" alt="Watch the demo" width="720">
+  <img src="https://img.youtube.com/vi/5CoxSsQg-L8/maxresdefault.jpg" alt="Watch the demo" width="720">
+</a>
 
 ## NOTE
 We have turned off frontend and backend. But if you message us we can set it up again, easily.
