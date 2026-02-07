@@ -31,7 +31,10 @@ function SleekTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
     return null;
   }
 
-  const visibleRoutes = state.routes;
+  const visibleRoutes = state.routes.filter((route) => {
+    const options = descriptors[route.key]?.options;
+    return options?.tabBarButton !== null;
+  });
 
   return (
     <View
@@ -96,13 +99,15 @@ export function TabbedRoot() {
           component={MediaScrollScreen}
           options={{ headerShown: false }}
         />
-        {features.enableProfileScreen ? (
-          <Tab.Screen
-            name="Profile"
-            component={ProfileScreen}
-            options={{ title: "Profile", headerShown: false }}
-          />
-        ) : null}
+        <Tab.Screen
+          name="Profile"
+          component={ProfileScreen}
+          options={{
+            title: "Profile",
+            headerShown: false,
+            tabBarButton: () => null,
+          }}
+        />
       </Tab.Navigator>
     </NavigationContainer>
   );
