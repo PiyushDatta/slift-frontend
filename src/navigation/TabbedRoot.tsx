@@ -11,7 +11,6 @@ import { Ionicons } from "@expo/vector-icons";
 import { uiTokens } from "../config/uiSettings";
 import { ProfileScreen } from "../screens/ProfileScreen";
 import { MediaScrollScreen } from "../screens/MediaScrollScreen";
-import { features } from "../config/features";
 import { useSettings } from "../context/SettingsContext";
 import { createTabbedRootStyles } from "../styles/TabbedRootStyles";
 import { TabsParamList } from "./types";
@@ -105,7 +104,6 @@ export function TabbedRoot() {
           options={{
             title: "Profile",
             headerShown: false,
-            tabBarButton: () => null,
           }}
         />
       </Tab.Navigator>
