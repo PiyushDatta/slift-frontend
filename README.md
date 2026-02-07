@@ -1,5 +1,12 @@
 # Slift Frontend
 
+## Demo
+
+[Demo](recording_of_slift.mp4)
+
+## NOTE
+We have turned off frontend and backend. But if you message us we can set it up again, easily.
+
 ## Install And Run
 
 1. `bun install`
