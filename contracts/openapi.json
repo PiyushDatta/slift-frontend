@@ -979,6 +979,62 @@
         }
       }
     },
+    "/posts/feedback": {
+      "post": {
+        "summary": "Submit like/dislike feedback for a post",
+        "operationId": "submitPostFeedback",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PostFeedbackRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PostFeedbackResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/user/profile": {
       "get": {
         "summary": "Get user profile state",
@@ -1213,6 +1269,16 @@
           "id": {
             "type": "string"
           },
+          "source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "userName": {
             "type": "string"
           },
@@ -1254,6 +1320,16 @@
         "properties": {
           "id": {
             "type": "string"
+          },
+          "source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "userName": {
             "type": "string"
@@ -1361,6 +1437,70 @@
         },
         "additionalProperties": false
       },
+      "PostFeedbackRequest": {
+        "type": "object",
+        "required": ["post_id", "liked"],
+        "properties": {
+          "post_id": {
+            "type": "string"
+          },
+          "liked": {
+            "type": "boolean"
+          },
+          "source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "content": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "PostFeedbackResponse": {
+        "type": "object",
+        "required": ["ok", "post_id", "liked", "likes", "dislikes"],
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "post_id": {
+            "type": "string"
+          },
+          "liked": {
+            "type": "boolean"
+          },
+          "source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "likes": {
+            "type": "integer"
+          },
+          "dislikes": {
+            "type": "integer"
+          }
+        },
+        "additionalProperties": false
+      },
       "TwitterLinkResponse": {
         "type": "object",
         "properties": {
@@ -1374,6 +1514,9 @@
         "type": "object",
         "properties": {
           "running": {
+            "type": "boolean"
+          },
+          "graph_ready": {
             "type": "boolean"
           },
           "requires_auth": {

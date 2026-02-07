@@ -1,12 +1,13 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Animated,
-  Dimensions,
   FlatList,
   Image,
+  Platform,
   Pressable,
   ScrollView,
   Text,
+  useWindowDimensions,
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -18,7 +19,8 @@ import { useNodesData } from "../context/NodesDataContext";
 import { useProfileData } from "../context/ProfileDataContext";
 import { AppBackground } from "../components/AppBackground";
 import { createMediaScrollStyles } from "../styles/MediaScrollScreenStyles";
-import { ApiPost } from "../api";
+import { submitPostFeedback } from "../api";
+import type { ApiPost, PostFeedbackResponse } from "../api";
 import { TabsParamList } from "../navigation/types";
 import { KnowledgeGraphScreen } from "./KnowledgeGraphScreen";
 import {
@@ -30,6 +32,35 @@ import {
 import { VISIBLE_FOR_YOU_POSTS } from "../config/dataLimits";
 
 type Post = ApiPost;
+type PostFeedbackState = {
+  likes: number;
+  dislikes: number;
+  liked: boolean | null;
+  submitting: boolean;
+};
+
+const EMPTY_POST_FEEDBACK_STATE: PostFeedbackState = {
+  likes: 0,
+  dislikes: 0,
+  liked: null,
+  submitting: false,
+};
+
+const postFeedbackStateFromResponse = (
+  response: PostFeedbackResponse,
+): PostFeedbackState => ({
+  likes:
+    typeof response.likes === "number" && Number.isFinite(response.likes)
+      ? Math.max(0, response.likes)
+      : 0,
+  dislikes:
+    typeof response.dislikes === "number" && Number.isFinite(response.dislikes)
+      ? Math.max(0, response.dislikes)
+      : 0,
+  liked: response.liked,
+  submitting: false,
+});
+
 const DESKTOP_VISIBLE_TOPIC_COUNT = 4;
 type MediaScrollScreenRoute = RouteProp<TabsParamList, "Main">;
 type MediaScrollScreenNavigation = {
@@ -38,6 +69,44 @@ type MediaScrollScreenNavigation = {
 type MediaScrollScreenProps = {
   route?: MediaScrollScreenRoute;
   navigation?: MediaScrollScreenNavigation;
+};
+
+const getWebWindow = () => {
+  if (Platform.OS !== "web" || typeof globalThis === "undefined") {
+    return null;
+  }
+
+  const maybeWindow = globalThis as typeof globalThis & {
+    window?: {
+      innerWidth?: unknown;
+      addEventListener?: (
+        event: string,
+        handler: () => void,
+        options?: unknown,
+      ) => void;
+      removeEventListener?: (
+        event: string,
+        handler: () => void,
+        options?: unknown,
+      ) => void;
+    };
+  };
+
+  return maybeWindow.window ?? null;
+};
+
+const readWebInnerWidth = () => {
+  const webWindow = getWebWindow();
+  if (!webWindow) {
+    return null;
+  }
+
+  const width = webWindow.innerWidth;
+  if (typeof width !== "number" || !Number.isFinite(width) || width <= 0) {
+    return null;
+  }
+
+  return width;
 };
 
 const renderMedia = (
@@ -111,6 +180,8 @@ type FeedCardProps = {
   styles: ReturnType<typeof createMediaScrollStyles>;
   isDesktop: boolean;
   topicLabel: string;
+  feedbackState: PostFeedbackState;
+  onSubmitFeedback: (post: Post, liked: boolean, sourceLabel: string) => void;
 };
 
 function FeedCard({
@@ -119,11 +190,10 @@ function FeedCard({
   styles,
   isDesktop,
   topicLabel,
+  feedbackState,
+  onSubmitFeedback,
 }: FeedCardProps) {
   const reveal = useRef(new Animated.Value(0)).current;
-  const rawType =
-    typeof item.type === "string" ? item.type.trim() : String(item.type ?? "");
-  const hasTypeLabel = rawType.length > 0 && rawType.toLowerCase() !== "text";
 
   useEffect(() => {
     reveal.setValue(0);
@@ -139,6 +209,12 @@ function FeedCard({
     inputRange: [0, 1],
     outputRange: [18, 0],
   });
+  const sourceLabel =
+    typeof item.source === "string" && item.source.trim().length > 0
+      ? item.source.trim()
+      : topicLabel;
+  const liked = feedbackState.liked === true;
+  const disliked = feedbackState.liked === false;
 
   return (
     <Animated.View
@@ -169,32 +245,60 @@ function FeedCard({
         </View>
       </View>
       <View style={styles.postMetaRow}>
-        {hasTypeLabel ? <Text style={styles.postMeta}>{rawType}</Text> : null}
-        <Text style={styles.postMetaSoft}>
-          {formatPostTimestamp(item.timestamp)}
-        </Text>
+        <Text style={styles.postSource}>{sourceLabel}</Text>
+        <Text style={styles.postMetaSoft}>{formatPostTimestamp(item.timestamp)}</Text>
       </View>
       <Text style={styles.content}>{item.content ?? ""}</Text>
       {renderMedia(item, styles)}
       {isDesktop ? (
-        <>
-          <View style={styles.tagRow}>
-            <View style={styles.tag}>
-              <Text style={styles.tagText}>{topicLabel}</Text>
-            </View>
-            {hasTypeLabel ? (
-              <View style={styles.tag}>
-                <Text style={styles.tagText}>{rawType.toUpperCase()}</Text>
-              </View>
-            ) : null}
+        <View style={styles.tagRow}>
+          <View style={styles.tag}>
+            <Text style={styles.tagText}>{topicLabel}</Text>
           </View>
-          <View style={styles.cardFooter}>
-            <Text style={styles.footerStat}>{`Likes ${126 + index * 8}`}</Text>
-            <Text style={styles.footerStat}>{`Replies ${42 + index * 4}`}</Text>
-            <Text style={styles.footerStat}>{`Reposts ${31 + index * 3}`}</Text>
-          </View>
-        </>
+        </View>
       ) : null}
+      <View style={styles.feedbackActionsRow}>
+        <Pressable
+          onPress={() => onSubmitFeedback(item, true, sourceLabel)}
+          disabled={feedbackState.submitting}
+          style={[
+            styles.feedbackButton,
+            liked ? styles.feedbackButtonActive : null,
+            feedbackState.submitting ? styles.feedbackButtonDisabled : null,
+          ]}
+        >
+          <Text
+            style={[
+              styles.feedbackButtonText,
+              liked ? styles.feedbackButtonTextActive : null,
+            ]}
+          >
+            Like
+          </Text>
+        </Pressable>
+        <Pressable
+          onPress={() => onSubmitFeedback(item, false, sourceLabel)}
+          disabled={feedbackState.submitting}
+          style={[
+            styles.feedbackButton,
+            disliked ? styles.feedbackButtonActive : null,
+            feedbackState.submitting ? styles.feedbackButtonDisabled : null,
+          ]}
+        >
+          <Text
+            style={[
+              styles.feedbackButtonText,
+              disliked ? styles.feedbackButtonTextActive : null,
+            ]}
+          >
+            Dislike
+          </Text>
+        </Pressable>
+      </View>
+      <View style={styles.cardFooter}>
+        <Text style={styles.footerStat}>{`Likes ${feedbackState.likes}`}</Text>
+        <Text style={styles.footerStat}>{`Dislikes ${feedbackState.dislikes}`}</Text>
+      </View>
     </Animated.View>
   );
 }
@@ -205,10 +309,37 @@ export function MediaScrollScreen({
 }: MediaScrollScreenProps = {}) {
   const { size } = useSettings();
   const styles = useMemo(createMediaScrollStyles, [size]);
+  const { width: measuredWindowWidth } = useWindowDimensions();
+  const [webWindowWidth, setWebWindowWidth] = useState<number | null>(() =>
+    readWebInnerWidth(),
+  );
   const { selectedNode, setSelectedNode } = useKnowledgeSelection();
   const { data, status: nodesStatus, isCleared } = useNodesData();
   const { data: profile } = useProfileData();
-  const windowWidth = Dimensions.get("window").width;
+  useEffect(() => {
+    const webWindow = getWebWindow();
+    if (!webWindow?.addEventListener || !webWindow?.removeEventListener) {
+      return;
+    }
+
+    const syncWidth = () => {
+      const next = readWebInnerWidth();
+      if (typeof next === "number") {
+        setWebWindowWidth(next);
+      }
+    };
+
+    syncWidth();
+    webWindow.addEventListener("resize", syncWidth);
+    return () => {
+      webWindow.removeEventListener("resize", syncWidth);
+    };
+  }, []);
+
+  const windowWidth =
+    Platform.OS === "web"
+      ? (webWindowWidth ?? measuredWindowWidth)
+      : measuredWindowWidth;
   const isDesktop = windowWidth >= 1180;
   const showRightRail = windowWidth >= 1420;
   const [desktopView, setDesktopView] = useState<"feed" | "graph">("feed");
@@ -357,6 +488,73 @@ export function MediaScrollScreen({
   const isLoading = nodesStatus === "loading" || nodesStatus === "idle";
   const basePosts = selectedNodeId ? nodePosts : aggregatedPosts;
   const posts = basePosts;
+  const [feedbackByPostId, setFeedbackByPostId] = useState<
+    Record<string, PostFeedbackState>
+  >({});
+  const feedbackInFlightRef = useRef(new Set<string>());
+
+  const getFeedbackStateForPost = useCallback(
+    (post: Post): PostFeedbackState => {
+      if (!post.id) {
+        return EMPTY_POST_FEEDBACK_STATE;
+      }
+      return feedbackByPostId[post.id] ?? EMPTY_POST_FEEDBACK_STATE;
+    },
+    [feedbackByPostId],
+  );
+
+  const handleSubmitFeedback = useCallback(
+    async (post: Post, liked: boolean, sourceLabel: string) => {
+      const postId = post.id?.trim();
+      if (!postId) {
+        return;
+      }
+      if (feedbackInFlightRef.current.has(postId)) {
+        return;
+      }
+      feedbackInFlightRef.current.add(postId);
+      setFeedbackByPostId((previous) => {
+        const current = previous[postId] ?? EMPTY_POST_FEEDBACK_STATE;
+        return {
+          ...previous,
+          [postId]: {
+            ...current,
+            submitting: true,
+          },
+        };
+      });
+
+      try {
+        const response = await submitPostFeedback({
+          post_id: postId,
+          liked,
+          source: post.source ?? sourceLabel,
+          content: post.content ?? null,
+        });
+        setFeedbackByPostId((previous) => ({
+          ...previous,
+          [postId]: postFeedbackStateFromResponse(response),
+        }));
+      } catch {
+        setFeedbackByPostId((previous) => {
+          const current = previous[postId];
+          if (!current) {
+            return previous;
+          }
+          return {
+            ...previous,
+            [postId]: {
+              ...current,
+              submitting: false,
+            },
+          };
+        });
+      } finally {
+        feedbackInFlightRef.current.delete(postId);
+      }
+    },
+    [],
+  );
 
   const title = selectedNodeLabel ?? "Slift";
   const subtitle = isForYouSelected
@@ -726,6 +924,8 @@ export function MediaScrollScreen({
                           styles={styles}
                           isDesktop
                           topicLabel={getTopicLabelForPost(item)}
+                          feedbackState={getFeedbackStateForPost(item)}
+                          onSubmitFeedback={handleSubmitFeedback}
                         />
                       ))
                     : renderEmptyState}
@@ -837,6 +1037,8 @@ export function MediaScrollScreen({
                 styles={styles}
                 isDesktop={false}
                 topicLabel={getTopicLabelForPost(item)}
+                feedbackState={getFeedbackStateForPost(item)}
+                onSubmitFeedback={handleSubmitFeedback}
               />
             )}
           />

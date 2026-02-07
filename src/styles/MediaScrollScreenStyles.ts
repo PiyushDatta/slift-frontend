@@ -588,6 +588,13 @@ export const createMediaScrollStyles = () =>
       fontWeight: "700",
       fontFamily: theme.fontFamilyBody,
     },
+    postSource: {
+      fontSize: uiTokens.font(11),
+      color: theme.colors.accentAmber,
+      fontWeight: "700",
+      letterSpacing: 0.2,
+      fontFamily: theme.fontFamilyBody,
+    },
     postMetaSoft: {
       fontSize: uiTokens.font(11),
       color: theme.colors.textSoft,
@@ -605,6 +612,35 @@ export const createMediaScrollStyles = () =>
       gap: uiTokens.spacing(8),
       flexWrap: "wrap",
       alignItems: "center",
+    },
+    feedbackActionsRow: {
+      flexDirection: "row",
+      gap: uiTokens.spacing(8),
+      alignItems: "center",
+    },
+    feedbackButton: {
+      borderRadius: uiTokens.radius(999),
+      borderWidth: 1,
+      borderColor: theme.colors.borderSoft,
+      backgroundColor: "rgba(24, 31, 42, 0.92)",
+      paddingHorizontal: uiTokens.spacing(12),
+      paddingVertical: uiTokens.spacing(6),
+    },
+    feedbackButtonActive: {
+      borderColor: "rgba(246, 173, 27, 0.4)",
+      backgroundColor: "rgba(246, 173, 27, 0.14)",
+    },
+    feedbackButtonDisabled: {
+      opacity: 0.7,
+    },
+    feedbackButtonText: {
+      color: theme.colors.textMuted,
+      fontSize: uiTokens.font(12),
+      fontWeight: "600",
+      fontFamily: theme.fontFamilyBody,
+    },
+    feedbackButtonTextActive: {
+      color: theme.colors.accentAmber,
     },
     tag: {
       borderRadius: uiTokens.radius(999),

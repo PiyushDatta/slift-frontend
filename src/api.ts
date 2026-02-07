@@ -17,6 +17,8 @@ export type {
   TwitterFeedRequest,
   TwitterFeedSyncResponse,
   TwitterSyncStatusResponse,
+  PostFeedbackRequest,
+  PostFeedbackResponse,
   QueueClearResponse,
   QueueStatusResponse,
   QueueStatusRequest,
@@ -36,6 +38,8 @@ import type {
   TwitterFeedRequest,
   TwitterFeedSyncResponse,
   TwitterSyncStatusResponse,
+  PostFeedbackRequest,
+  PostFeedbackResponse,
   QueueClearResponse,
   QueueStatusResponse,
   QueueStatusRequest,
@@ -253,6 +257,20 @@ export const syncTwitterFeed = async (
           : undefined,
         limit: options?.limit,
       }),
+    },
+    { requiresAuth: true },
+  );
+};
+
+export const submitPostFeedback = async (
+  feedback: PostFeedbackRequest,
+): Promise<PostFeedbackResponse> => {
+  return requestJson<PostFeedbackResponse>(
+    apiContract.post.submitPostFeedback.path,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(feedback),
     },
     { requiresAuth: true },
   );

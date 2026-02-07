@@ -49,6 +49,11 @@ export const apiContract = {
       path: "/twitter/feed/sync",
       requestRef: "#/components/schemas/TwitterFeedRequest",
     },
+    submitPostFeedback: {
+      path: "/posts/feedback",
+      requestRef: "#/components/schemas/PostFeedbackRequest",
+      responseRef: "#/components/schemas/PostFeedbackResponse",
+    },
     clearQueue: {
       path: "/queue/clear",
     },
@@ -115,6 +120,7 @@ export type AdminResetResponse = {
 
 export type ApiPost = {
   id: string;
+  source?: string | null;
   userName?: string | null;
   userHandle?: string | null;
   userAvatar?: string | null;
@@ -128,6 +134,7 @@ export type ApiPost = {
 
 export type RetweetedPost = {
   id: string;
+  source?: string | null;
   userName?: string | null;
   userHandle?: string | null;
   userAvatar?: string | null;
@@ -180,9 +187,26 @@ export type TwitterFeedSyncResponse = Record<string, unknown>;
 
 export type TwitterSyncStatusResponse = {
   running?: boolean | null;
+  graph_ready?: boolean | null;
   requires_auth?: boolean | null;
   auth_url?: string | null;
   last_error?: string | null;
+};
+
+export type PostFeedbackRequest = {
+  post_id: string;
+  liked: boolean;
+  source?: string | null;
+  content?: string | null;
+};
+
+export type PostFeedbackResponse = {
+  ok: boolean;
+  post_id: string;
+  liked: boolean;
+  source?: string | null;
+  likes: number;
+  dislikes: number;
 };
 
 export type QueueClearResponse = Record<string, unknown>;
