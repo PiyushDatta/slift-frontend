@@ -42,6 +42,7 @@ const SESSION_TOKEN_KEY = "slift_session_token";
 const SESSION_EXPIRES_AT_KEY = "slift_session_expires_at";
 const AUTH_ACK_POLL_MS = 1400;
 const AUTH_ACK_TIMEOUT_MS = 120_000;
+const CLIENT_SESSION_MIN_MS = 30 * 60 * 1000;
 
 const sleep = (ms: number) =>
   new Promise<void>((resolve) => {
@@ -204,7 +205,13 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
   const applySession = useCallback(
     (token: string, expiresAt?: number | null) => {
-      const expiresAtMs = normalizeExpiryMs(expiresAt);
+      let expiresAtMs = normalizeExpiryMs(expiresAt);
+      if (
+        typeof expiresAtMs !== "number" ||
+        expiresAtMs - Date.now() < CLIENT_SESSION_MIN_MS
+      ) {
+        expiresAtMs = Date.now() + CLIENT_SESSION_MIN_MS;
+      }
       sessionTokenRef.current = token;
       setSessionToken(token);
       setSessionExpiresAt(expiresAtMs);
@@ -240,19 +247,16 @@ export function AuthProvider({ children }: AuthProviderProps) {
       try {
         const isValid = await validateSessionToken(persisted.token);
         if (cancelled) return;
-
-        // Backend remains source of truth, but boot policy requires a fresh token
-        // each app launch instead of reusing persisted client state.
+        if (isValid) {
+          applySession(persisted.token, persisted.expiresAt ?? null);
+          return;
+        }
         await clearPersistedSession();
         if (cancelled) return;
         setSessionToken(null);
         setSessionExpiresAt(null);
         setStatus("unauthenticated");
-        setReauthMessage(
-          isValid
-            ? "Session verified. Please sign in to refresh your token."
-            : "Your session expired. Please sign in again.",
-        );
+        setReauthMessage("Your session expired. Please sign in again.");
       } catch (error) {
         await clearPersistedSession();
         if (cancelled) return;
