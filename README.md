@@ -2,7 +2,7 @@
 
 ## Demo
 
-[Demo](recording_of_slift.mp4)
+[![Watch the demo](slift_thumbnail.png)](https://www.youtube.com/watch?v=5CoxSsQg-L8)
 
 ## NOTE
 We have turned off frontend and backend. But if you message us we can set it up again, easily.
